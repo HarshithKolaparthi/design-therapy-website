@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { HeroLanding } from './components/HeroLanding';
 import { TeamForm } from './components/TeamForm';
 import { ProblemStatementGrid } from './components/ProblemStatementGrid';
@@ -26,10 +26,45 @@ function App() {
   const formRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  const handleAdminReset = () => {
-    if (window.confirm("Are you sure you want to reset all selected problem statements? This will make them all available again on the frontend.")) {
-      setTakenStatements([]);
-      alert("Statements have been reset and are available for new teams.");
+  const fetchTakenStatements = async () => {
+    if (!GOOGLE_SCRIPT_URL) return;
+    try {
+      const response = await fetch(GOOGLE_SCRIPT_URL);
+      const data = await response.json();
+      if (data && Array.isArray(data.taken)) {
+        setTakenStatements(data.taken);
+      }
+    } catch (error) {
+      console.error("Failed to fetch taken statements", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchTakenStatements();
+    // Poll every 10 seconds to keep all devices globally synced
+    const interval = setInterval(() => {
+      fetchTakenStatements();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleAdminReset = async () => {
+    if (window.confirm("Are you sure you want to completely RESET the Google Sheet? All selected problems will become available again.")) {
+      try {
+        if (GOOGLE_SCRIPT_URL) {
+          await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: "reset" })
+          });
+        }
+        setTakenStatements([]);
+        alert("Statements have been reset and are available for new teams.");
+      } catch (error) {
+        console.error("Failed to reset", error);
+        alert("An error occurred trying to reset the Google Sheet.");
+      }
     }
   };
 
