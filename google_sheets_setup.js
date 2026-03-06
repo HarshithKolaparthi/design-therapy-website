@@ -12,39 +12,70 @@
 // 10. You do NOT need a new URL. The same URL will now use the new code.
 
 function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  var data = JSON.parse(e.postData.contents);
+  // Use a lock to prevent concurrent submissions from multiple devices
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000); // wait up to 10 seconds for other submissions
 
-  // Handle Reset Action
-  if (data.action === "reset") {
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      // Delete all rows except header
-      sheet.deleteRows(2, lastRow - 1);
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var data;
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch(err) {
+      return ContentService.createTextOutput(JSON.stringify({"status": "error", "message": "Invalid JSON mapping"}))
+        .setMimeType(ContentService.MimeType.JSON);
     }
-    return ContentService.createTextOutput(JSON.stringify({ "status": "reset_success" }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
+    
+    // Handle Reset Action
+    if (data.action === "reset") {
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        // Delete all rows except header
+        sheet.deleteRows(2, lastRow - 1);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ "status": "reset_success" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
 
-  // Handle Submit Action
-  if (sheet.getLastRow() === 0) {
+    // Handle Submit Action
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "Timestamp", "Team Number", "Problem Statement ID", 
+        "P1 Name", "P1 Reg Number", "P2 Name", "P2 Reg Number", 
+        "P3 Name", "P3 Reg Number", "P4 Name", "P4 Reg Number"
+      ]);
+    }
+    
+    // Check if the problem statement is already taken by someone else
+    var newStatement = data.selectedProblemStatement;
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1 && newStatement) {
+      var takenValues = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
+      for (var i = 0; i < takenValues.length; i++) {
+        if (takenValues[i][0] && takenValues[i][0].toString() === newStatement.toString()) {
+          return ContentService.createTextOutput(JSON.stringify({ "status": "taken_error", "message": "Already taken" }))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+    }
+    
     sheet.appendRow([
-      "Timestamp", "Team Number", "Problem Statement ID",
-      "P1 Name", "P1 Reg Number", "P2 Name", "P2 Reg Number",
-      "P3 Name", "P3 Reg Number", "P4 Name", "P4 Reg Number"
+      new Date(), data.teamNumber, data.selectedProblemStatement,
+      data.participant1Name, data.participant1RegisterNumber,
+      data.participant2Name, data.participant2RegisterNumber,
+      data.participant3Name || "", data.participant3RegisterNumber || "",
+      data.participant4Name || "", data.participant4RegisterNumber || ""
     ]);
+    
+    return ContentService.createTextOutput(JSON.stringify({ "status": "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ "status": "error", "message": err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
   }
-
-  sheet.appendRow([
-    new Date(), data.teamNumber, data.selectedProblemStatement,
-    data.participant1Name, data.participant1RegisterNumber,
-    data.participant2Name, data.participant2RegisterNumber,
-    data.participant3Name || "", data.participant3RegisterNumber || "",
-    data.participant4Name || "", data.participant4RegisterNumber || ""
-  ]);
-
-  return ContentService.createTextOutput(JSON.stringify({ "status": "success" }))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // GET request returns the list of taken problem statement IDs

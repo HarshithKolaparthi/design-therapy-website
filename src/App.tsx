@@ -52,15 +52,24 @@ function App() {
     if (window.confirm("Are you sure you want to completely RESET the Google Sheet? All selected problems will become available again.")) {
       try {
         if (GOOGLE_SCRIPT_URL) {
-          await fetch(GOOGLE_SCRIPT_URL, {
+          const response = await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
+            // Omit mode: 'no-cors' so we can read the response
+            // Omit Content-Type so it defaults to text/plain, bypassing preflight
             body: JSON.stringify({ action: "reset" })
           });
+          const result = await response.json();
+          if (result.status === 'reset_success') {
+            setTakenStatements([]);
+            alert("Statements have been reset and are available for new teams.");
+          } else {
+            console.error("Reset failed on server:", result);
+            alert("Failed to reset the sheet.");
+          }
+        } else {
+          setTakenStatements([]);
+          alert("Statements reset locally (No URL connected).");
         }
-        setTakenStatements([]);
-        alert("Statements have been reset and are available for new teams.");
       } catch (error) {
         console.error("Failed to reset", error);
         alert("An error occurred trying to reset the Google Sheet.");
@@ -113,15 +122,25 @@ function App() {
 
     try {
       if (GOOGLE_SCRIPT_URL) {
-        // Send actual request to the Google Apps Script Web App
-        await fetch(GOOGLE_SCRIPT_URL, {
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
           method: 'POST',
-          mode: 'no-cors', // Standard bypass for Google Apps Script CORS
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          // Omit mode: 'no-cors' so we can read the JSON response
+          // Omit Content-Type so it defaults to text/plain, bypassing CORS preflight
           body: JSON.stringify(googleSheetsPayload)
         });
+        
+        const result = await response.json();
+        
+        if (result.status === 'taken_error') {
+          alert("Sorry, this problem statement was just selected by another team! Please choose another one.");
+          await fetchTakenStatements(); // Refetch the latest taken list
+          setIsSubmitting(false);
+          setAppState('SELECTION');
+          setSelectedStatementId(null);
+          return;
+        } else if (result.status !== 'success') {
+          throw new Error(result.message || "Unknown error from server");
+        }
       } else {
         // Mock if URL not yet provided
         console.log("Mocking Google Sheets Submission (No URL provided):", googleSheetsPayload);
@@ -129,9 +148,12 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to submit to Google Sheets", error);
+      alert("Failed to submit. Please try again or contact organizers.");
+      setIsSubmitting(false);
+      return;
     }
     
-    // Lock the selected problem statement by adding it to taken (first-come first-serve mechanism)
+    // Lock the selected problem statement locally for immediate feedback
     setTakenStatements(prev => [...prev, selectedStatementId]);
     
     setIsSubmitting(false);
